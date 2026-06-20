@@ -60,10 +60,10 @@
   .titlebar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .titlebar h1{ font-size:16px; margin:0; font-weight:700; letter-spacing:-0.2px; }
   .titlebar .sub{ font-size:11px; color:var(--ink-soft); margin-top:2px; }
-  .langs{ display:flex; gap:4px; flex:0 0 auto; }
+  .langs{ display:flex; gap:3px; flex:0 0 auto; }
   .langs button{
     border:1px solid var(--line); background:var(--card); color:var(--ink-soft);
-    font-size:11px; font-weight:600; padding:5px 8px; border-radius:8px; cursor:pointer;
+    font-size:10.5px; font-weight:700; padding:5px 7px; border-radius:8px; cursor:pointer;
   }
   .langs button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
 
@@ -170,10 +170,11 @@
         <div class="sub" data-i18n="appSubtitle">병원·약국·편의점·대중교통·경찰서·소방서</div>
       </div>
       <div class="langs">
-        <button data-lang="ko" class="active">한국어</button>
+        <button data-lang="ko" class="active">KO</button>
         <button data-lang="en">EN</button>
-        <button data-lang="zh">中文</button>
-        <button data-lang="ja">日本語</button>
+        <button data-lang="it">IT</button>
+        <button data-lang="es">ES</button>
+        <button data-lang="pt">PT</button>
       </div>
     </div>
     <a id="subwayMapLink" href="https://www.seoulmetro.co.kr/kr/cyberStation.do" target="_blank" rel="noopener" class="subwaymap-btn" data-i18n="subwayMapBtn">🚇 지하철 노선도</a>
@@ -257,35 +258,50 @@ const I18N = {
     subwayMapBtn: "🚇 Subway Map",
     busFallback: "See more bus stops in Kakao Map app →",
   },
-  zh: {
-    appTitle: "江北区访客地图",
-    appSubtitle: "医院·药店·便利店·公共交通·警察局·消防局",
-    groupSafety: "安全 · 急救",
-    groupConvenience: "便利 · 交通",
-    pickCategory: "请选择上方分类",
-    noResults: "1.5公里内无搜索结果",
-    call: "电话", directions: "路线",
-    cat_hospital: "医院", cat_pharmacy: "药店", cat_police: "警察局",
-    cat_fire: "消防局", cat_convenience: "便利店", cat_subway: "地铁站", cat_bus: "公交站",
-    cat_cathedral: "天主教堂",
-    resultsFor: (n)=>`${n} · 由近到远`,
-    subwayMapBtn: "🚇 地铁线路图",
-    busFallback: "在Kakao地图App查看更多公交站 →",
+  it: {
+    appTitle: "Mappa per Visitatori di Gangbuk-gu",
+    appSubtitle: "Ospedali · Farmacie · Minimarket · Trasporti · Polizia · Vigili del fuoco",
+    groupSafety: "Sicurezza & Emergenza",
+    groupConvenience: "Servizi & Trasporti",
+    pickCategory: "Scegli una categoria sopra",
+    noResults: "Nessun risultato entro 1,5 km",
+    call: "Chiama", directions: "Indicazioni",
+    cat_hospital: "Ospedale", cat_pharmacy: "Farmacia", cat_police: "Polizia",
+    cat_fire: "Vigili del fuoco", cat_convenience: "Minimarket", cat_subway: "Stazione metro", cat_bus: "Fermata bus",
+    cat_cathedral: "Chiesa cattolica",
+    resultsFor: (n)=>`${n} · più vicino prima`,
+    subwayMapBtn: "🚇 Mappa della metro",
+    busFallback: "Vedi più fermate bus nell'app Kakao Map →",
   },
-  ja: {
-    appTitle: "江北区(カンブクグ)訪問者マップ",
-    appSubtitle: "病院・薬局・コンビニ・公共交通・警察署・消防署",
-    groupSafety: "安全・救急",
-    groupConvenience: "便利・交通",
-    pickCategory: "上のカテゴリーを選んでください",
-    noResults: "半径1.5km以内に結果がありません",
-    call: "電話", directions: "道順",
-    cat_hospital: "病院", cat_pharmacy: "薬局", cat_police: "警察署",
-    cat_fire: "消防署", cat_convenience: "コンビニ", cat_subway: "地下鉄駅", cat_bus: "バス停",
-    cat_cathedral: "カトリック教会",
-    resultsFor: (n)=>`${n} · 近い順`,
-    subwayMapBtn: "🚇 地下鉄路線図",
-    busFallback: "Kakaoマップアプリでバス停をもっと見る →",
+  es: {
+    appTitle: "Mapa para Visitantes de Gangbuk-gu",
+    appSubtitle: "Hospitales · Farmacias · Tiendas · Transporte · Policía · Bomberos",
+    groupSafety: "Seguridad y Emergencias",
+    groupConvenience: "Comodidad y Transporte",
+    pickCategory: "Elige una categoría arriba",
+    noResults: "Sin resultados en 1.5 km",
+    call: "Llamar", directions: "Cómo llegar",
+    cat_hospital: "Hospital", cat_pharmacy: "Farmacia", cat_police: "Policía",
+    cat_fire: "Bomberos", cat_convenience: "Tienda de conveniencia", cat_subway: "Estación de metro", cat_bus: "Parada de autobús",
+    cat_cathedral: "Iglesia católica",
+    resultsFor: (n)=>`${n} · más cercano primero`,
+    subwayMapBtn: "🚇 Mapa del metro",
+    busFallback: "Ver más paradas de autobús en la app Kakao Map →",
+  },
+  pt: {
+    appTitle: "Mapa para Visitantes de Gangbuk-gu",
+    appSubtitle: "Hospitais · Farmácias · Lojas de conveniência · Transporte · Polícia · Bombeiros",
+    groupSafety: "Segurança e Emergência",
+    groupConvenience: "Conveniência e Transporte",
+    pickCategory: "Escolha uma categoria acima",
+    noResults: "Nenhum resultado em 1,5 km",
+    call: "Ligar", directions: "Como chegar",
+    cat_hospital: "Hospital", cat_pharmacy: "Farmácia", cat_police: "Polícia",
+    cat_fire: "Bombeiros", cat_convenience: "Loja de conveniência", cat_subway: "Estação de metrô", cat_bus: "Ponto de ônibus",
+    cat_cathedral: "Igreja católica",
+    resultsFor: (n)=>`${n} · mais próximo primeiro`,
+    subwayMapBtn: "🚇 Mapa do metrô",
+    busFallback: "Veja mais pontos de ônibus no app Kakao Map →",
   },
 };
 let currentLang = "ko";
