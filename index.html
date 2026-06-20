@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Gangbuk-gu Visitor Map</title>
+
+<!--
+  =====================================================================
+  설정 방법 (SETUP)
+  1) 카카오 개발자(https://developers.kakao.com) 에서 앱 생성 후
+     "JavaScript 키"를 발급받는다.
+  2) 카카오 개발자 콘솔 > 내 애플리케이션 > 플랫폼 > Web 에
+     실제로 배포할 도메인(예: https://yourname.github.io)을 등록한다.
+     (등록 안 하면 지도가 뜨지 않음. localhost 테스트는 보통 자동 허용됨)
+  3) 아래 KAKAO_APP_KEY 값을 발급받은 키로 교체한다.
+  4) 이 파일을 GitHub Pages / Netlify / Vercel 같은 정적 호스팅에 올리고
+     그 URL을 QR코드로 만들면 끝. 별도 서버(백엔드) 필요 없음.
+  =====================================================================
+-->
+<script>
+  const KAKAO_APP_KEY = "dabadca959ace60f5847cfd6878e98bd";
+</script>
+
+<style>
+  :root{
+    --bg: #F8F6F1;
+    --ink: #1B1F23;
+    --ink-soft: #5B6168;
+    --line: #E3DFD5;
+    --card: #FFFFFF;
+    --accent: #1D3557;
+    --safety-bg: #FBEEEE;
+    --conv-bg: #EEF3F8;
+
+    --c-hospital: #E63946;
+    --c-pharmacy: #2A9D8F;
+    --c-police: #1D3557;
+    --c-fire: #FF6B35;
+    --c-convenience: #F4A300;
+    --c-subway: #0EA5E9;
+    --c-bus: #7C5CBF;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    height:100%; margin:0; padding:0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Noto Sans SC", "Noto Sans JP", Roboto, sans-serif;
+    background:var(--bg); color:var(--ink);
+    -webkit-tap-highlight-color: transparent;
+  }
+  #app{ display:flex; flex-direction:column; height:100vh; height:100dvh; overflow:hidden; }
+
+  /* ---- App bar ---- */
+  header{
+    flex:0 0 auto;
+    padding: 10px 14px 8px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
+  }
+  .titlebar{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .titlebar h1{ font-size:16px; margin:0; font-weight:700; letter-spacing:-0.2px; }
+  .titlebar .sub{ font-size:11px; color:var(--ink-soft); margin-top:2px; }
+  .langs{ display:flex; gap:4px; flex:0 0 auto; }
+  .langs button{
+    border:1px solid var(--line); background:var(--card); color:var(--ink-soft);
+    font-size:11px; font-weight:600; padding:5px 8px; border-radius:8px; cursor:pointer;
+  }
+  .langs button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  /* ---- Category chips ---- */
+  .chipzone{ flex:0 0 auto; background:var(--card); padding:8px 0 10px; border-bottom:1px solid var(--line); }
+  .chipgroup{ padding: 0 14px; }
+  .chipgroup + .chipgroup{ margin-top:8px; }
+  .chipgroup .eyebrow{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.06em;
+    color:var(--ink-soft); margin-bottom:5px;
+  }
+  .chiprow{ display:flex; gap:7px; overflow-x:auto; padding-bottom:2px; scrollbar-width:none; }
+  .chiprow::-webkit-scrollbar{ display:none; }
+  .chip{
+    flex:0 0 auto; display:flex; align-items:center; gap:6px;
+    border:1.5px solid var(--line); background:var(--card);
+    padding:7px 12px; border-radius:999px; font-size:12.5px; font-weight:600;
+    color:var(--ink); cursor:pointer; white-space:nowrap;
+  }
+  .chip .dot{ width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
+  .chip.active{ color:#fff; border-color:transparent; }
+
+  /* ---- Map ---- */
+  #mapwrap{ position:relative; flex:1 1 auto; min-height:0; }
+  #map{ width:100%; height:100%; }
+
+  #locateBtn{
+    position:absolute; right:12px; bottom:14px;
+    width:42px; height:42px; border-radius:50%;
+    background:var(--card); border:1px solid var(--line);
+    box-shadow:0 2px 8px rgba(0,0,0,0.12);
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; cursor:pointer; z-index:5;
+  }
+
+  .pin{
+    width:30px; height:30px; border-radius:50% 50% 50% 0;
+    transform: rotate(-45deg);
+    border:2px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,0.35);
+    display:flex; align-items:center; justify-content:center;
+  }
+  .pin span{ transform: rotate(45deg); font-size:14px; }
+  .pin.me{ border-radius:50%; transform:none; background:#1D3557; }
+
+  /* ---- Bottom sheet ---- */
+  #sheet{
+    flex:0 0 auto; background:var(--card); border-top:1px solid var(--line);
+    border-radius:16px 16px 0 0; box-shadow:0 -4px 14px rgba(0,0,0,0.06);
+    transition: max-height .22s ease; max-height:120px; display:flex; flex-direction:column; z-index:4;
+  }
+  #sheet.expanded{ max-height:46vh; }
+  .sheet-handle{ padding:9px 14px 6px; cursor:pointer; flex:0 0 auto; }
+  .sheet-handle .bar{ width:36px; height:4px; background:var(--line); border-radius:99px; margin:0 auto 8px; }
+  .sheet-handle .row{ display:flex; align-items:center; justify-content:space-between; }
+  .sheet-handle .name{ font-size:14px; font-weight:700; display:flex; align-items:center; gap:7px; }
+  .sheet-handle .count{ font-size:12px; color:var(--ink-soft); }
+  #list{ overflow-y:auto; padding: 0 10px 14px; flex:1 1 auto; }
+  .place{
+    display:flex; align-items:flex-start; gap:10px;
+    padding:10px 8px; border-bottom:1px solid var(--line);
+  }
+  .place:last-child{ border-bottom:none; }
+  .place.flash{ background:#FFF7E0; }
+  .place .badge{
+    width:30px; height:30px; border-radius:50%; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center; font-size:14px; color:#fff;
+  }
+  .place .info{ flex:1 1 auto; min-width:0; }
+  .place .pname{ font-size:13.5px; font-weight:700; margin:0 0 2px; }
+  .place .paddr{ font-size:11.5px; color:var(--ink-soft); margin:0 0 6px; line-height:1.3; }
+  .place .actions{ display:flex; gap:6px; flex-wrap:wrap; }
+  .place .actions a{
+    font-size:11px; font-weight:700; text-decoration:none;
+    border:1px solid var(--line); border-radius:8px; padding:4px 8px; color:var(--ink);
+  }
+  .place .dist{ font-size:11px; color:var(--ink-soft); flex:0 0 auto; white-space:nowrap; padding-top:2px; }
+  .empty{ text-align:center; color:var(--ink-soft); font-size:12.5px; padding:24px 10px; }
+
+  /* ---- Setup overlay (shown only if API key missing) ---- */
+  #setup{
+    position:fixed; inset:0; background:rgba(20,22,24,0.92); color:#fff;
+    z-index:50; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  #setup .box{ max-width:420px; font-size:13.5px; line-height:1.6; }
+  #setup h2{ font-size:16px; margin:0 0 10px; }
+  #setup code{ background:rgba(255,255,255,0.12); padding:1px 5px; border-radius:4px; }
+  #setup ol{ padding-left:18px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <header>
+    <div class="titlebar">
+      <div>
+        <h1 data-i18n="appTitle">강북구 방문자 지도</h1>
+        <div class="sub" data-i18n="appSubtitle">병원·약국·편의점·대중교통·경찰서·소방서</div>
+      </div>
+      <div class="langs">
+        <button data-lang="ko" class="active">한국어</button>
+        <button data-lang="en">EN</button>
+        <button data-lang="zh">中文</button>
+        <button data-lang="ja">日本語</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="chipzone">
+    <div class="chipgroup">
+      <div class="eyebrow" data-i18n="groupSafety">안전 · 응급</div>
+      <div class="chiprow" id="chips-safety"></div>
+    </div>
+    <div class="chipgroup">
+      <div class="eyebrow" data-i18n="groupConvenience">편의 · 교통</div>
+      <div class="chiprow" id="chips-conv"></div>
+    </div>
+  </div>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div id="locateBtn" title="my location">📍</div>
+  </div>
+
+  <div id="sheet">
+    <div class="sheet-handle" id="sheetHandle">
+      <div class="bar"></div>
+      <div class="row">
+        <div class="name" id="sheetTitle">
+          <span data-i18n="pickCategory">위 카테고리를 선택하세요</span>
+        </div>
+        <div class="count" id="sheetCount"></div>
+      </div>
+    </div>
+    <div id="list"></div>
+  </div>
+
+</div>
+
+<div id="setup" style="display:none;">
+  <div class="box">
+    <h2>⚠️ Kakao Maps API key required</h2>
+    <p>이 페이지를 작동시키려면 카카오 JavaScript 키가 필요합니다. (To run this page, a Kakao JavaScript key is required.)</p>
+    <ol>
+      <li>developers.kakao.com 에서 애플리케이션을 만들고 JavaScript 키를 발급받으세요.</li>
+      <li>콘솔 &gt; 플랫폼 &gt; Web 에 이 페이지가 배포될 도메인을 등록하세요.</li>
+      <li>이 파일 상단의 <code>KAKAO_APP_KEY</code> 값을 발급받은 키로 바꾼 뒤 다시 배포하세요.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   1. 다국어 텍스트
+   ========================================================= */
+const I18N = {
+  ko: {
+    appTitle: "강북구 방문자 지도",
+    appSubtitle: "병원·약국·편의점·대중교통·경찰서·소방서",
+    groupSafety: "안전 · 응급",
+    groupConvenience: "편의 · 교통",
+    pickCategory: "위 카테고리를 선택하세요",
+    noResults: "주변 1.5km 내 검색 결과가 없습니다",
+    call: "전화", directions: "길찾기",
+    cat_hospital: "병원", cat_pharmacy: "약국", cat_police: "경찰서",
+    cat_fire: "소방서", cat_convenience: "편의점", cat_subway: "지하철역", cat_bus: "버스정류장",
+    resultsFor: (n)=>`${n} · 가까운 순`,
+  },
+  en: {
+    appTitle: "Gangbuk-gu Visitor Map",
+    appSubtitle: "Hospitals · Pharmacies · Convenience · Transit · Police · Fire",
+    groupSafety: "Safety & Emergency",
+    groupConvenience: "Convenience & Transit",
+    pickCategory: "Choose a category above",
+    noResults: "No results within 1.5km",
+    call: "Call", directions: "Directions",
+    cat_hospital: "Hospital", cat_pharmacy: "Pharmacy", cat_police: "Police",
+    cat_fire: "Fire Station", cat_convenience: "Convenience Store", cat_subway: "Subway Station", cat_bus: "Bus Stop",
+    resultsFor: (n)=>`${n} · nearest first`,
+  },
+  zh: {
+    appTitle: "江北区访客地图",
+    appSubtitle: "医院·药店·便利店·公共交通·警察局·消防局",
+    groupSafety: "安全 · 急救",
+    groupConvenience: "便利 · 交通",
+    pickCategory: "请选择上方分类",
+    noResults: "1.5公里内无搜索结果",
+    call: "电话", directions: "路线",
+    cat_hospital: "医院", cat_pharmacy: "药店", cat_police: "警察局",
+    cat_fire: "消防局", cat_convenience: "便利店", cat_subway: "地铁站", cat_bus: "公交站",
+    resultsFor: (n)=>`${n} · 由近到远`,
+  },
+  ja: {
+    appTitle: "江北区(カンブクグ)訪問者マップ",
+    appSubtitle: "病院・薬局・コンビニ・公共交通・警察署・消防署",
+    groupSafety: "安全・救急",
+    groupConvenience: "便利・交通",
+    pickCategory: "上のカテゴリーを選んでください",
+    noResults: "半径1.5km以内に結果がありません",
+    call: "電話", directions: "道順",
+    cat_hospital: "病院", cat_pharmacy: "薬局", cat_police: "警察署",
+    cat_fire: "消防署", cat_convenience: "コンビニ", cat_subway: "地下鉄駅", cat_bus: "バス停",
+    resultsFor: (n)=>`${n} · 近い順`,
+  },
+};
+let currentLang = "ko";
+
+/* =========================================================
+   2. 카테고리 정의
+   - type "category": 카카오 카테고리 그룹 코드 검색
+   - type "keyword"  : 카카오 키워드 검색 (코드가 없는 업종)
+   ========================================================= */
+const CATEGORIES = [
+  { id:"hospital",    group:"safety", type:"category", code:"HP8", color:"var(--c-hospital)",    icon:"🏥", i18n:"cat_hospital" },
+  { id:"pharmacy",    group:"safety", type:"category", code:"PM9", color:"var(--c-pharmacy)",    icon:"💊", i18n:"cat_pharmacy" },
+  { id:"police",      group:"safety", type:"keyword",  keyword:"파출소", color:"var(--c-police)", icon:"🚓", i18n:"cat_police" },
+  { id:"fire",        group:"safety", type:"keyword",  keyword:"소방서", color:"var(--c-fire)",    icon:"🚒", i18n:"cat_fire" },
+  { id:"convenience", group:"conv",   type:"category", code:"CS2", color:"var(--c-convenience)", icon:"🏪", i18n:"cat_convenience" },
+  { id:"subway",      group:"conv",   type:"category", code:"SW8", color:"var(--c-subway)",      icon:"🚇", i18n:"cat_subway" },
+  { id:"bus",         group:"conv",   type:"keyword",  keyword:"버스정류장", color:"var(--c-bus)", icon:"🚌", i18n:"cat_bus" },
+];
+
+const SEARCH_RADIUS_M = 1500;
+// 강북구청 부근 기본 좌표 (GPS 권한이 없을 때 사용)
+const DEFAULT_CENTER = { lat: 37.6397, lng: 127.0256 };
+
+let map, places, geocoder;
+let centerLatLng = null;     // 현재 검색 기준 좌표 (kakao.maps.LatLng)
+let markers = [];
+let activeCategory = null;
+let myLocationOverlay = null;
+
+/* =========================================================
+   3. 부트스트랩
+   ========================================================= */
+function checkKeyAndStart(){
+  if(!KAKAO_APP_KEY || KAKAO_APP_KEY === "YOUR_KAKAO_JAVASCRIPT_KEY"){
+    document.getElementById("setup").style.display = "flex";
+    return;
+  }
+  const script = document.createElement("script");
+  script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_APP_KEY}&libraries=services&autoload=false`;
+  script.onload = () => kakao.maps.load(initMap);
+  script.onerror = () => {
+    document.getElementById("setup").style.display = "flex";
+  };
+  document.head.appendChild(script);
+}
+
+function initMap(){
+  const container = document.getElementById("map");
+  centerLatLng = new kakao.maps.LatLng(DEFAULT_CENTER.lat, DEFAULT_CENTER.lng);
+  map = new kakao.maps.Map(container, { center: centerLatLng, level: 5 });
+  places = new kakao.maps.services.Places();
+
+  buildChips();
+  applyI18n();
+
+  // GPS 위치를 시도해서 가능하면 그쪽으로 중심 이동
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(
+      (pos)=>{
+        const ll = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+        centerLatLng = ll;
+        map.setCenter(ll);
+        placeMyLocationMarker(ll);
+      },
+      ()=>{ /* 권한 거부 시 기본 좌표 유지 */ },
+      { enableHighAccuracy:true, timeout:5000 }
+    );
+  }
+
+  document.getElementById("locateBtn").addEventListener("click", locateMe);
+  document.getElementById("sheetHandle").addEventListener("click", toggleSheet);
+}
+
+function locateMe(){
+  if(!navigator.geolocation) return;
+  navigator.geolocation.getCurrentPosition((pos)=>{
+    const ll = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+    centerLatLng = ll;
+    map.setCenter(ll);
+    map.setLevel(4);
+    placeMyLocationMarker(ll);
+    if(activeCategory) runSearch(activeCategory);
+  });
+}
+
+function placeMyLocationMarker(ll){
+  if(myLocationOverlay) myLocationOverlay.setMap(null);
+  const el = document.createElement("div");
+  el.className = "pin me";
+  el.innerHTML = `<span>●</span>`;
+  myLocationOverlay = new kakao.maps.CustomOverlay({ position: ll, content: el, yAnchor: 0.5, zIndex: 10 });
+  myLocationOverlay.setMap(map);
+}
+
+/* =========================================================
+   4. 카테고리 칩 렌더링
+   ========================================================= */
+function buildChips(){
+  const safetyRow = document.getElementById("chips-safety");
+  const convRow = document.getElementById("chips-conv");
+  CATEGORIES.forEach(cat=>{
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    chip.dataset.id = cat.id;
+    chip.innerHTML = `<span class="dot" style="background:${cat.color}"></span><span class="lbl">${cat.icon} ${I18N[currentLang][cat.i18n]}</span>`;
+    chip.addEventListener("click", ()=> selectCategory(cat));
+    (cat.group === "safety" ? safetyRow : convRow).appendChild(chip);
+  });
+}
+
+function refreshChipLabels(){
+  document.querySelectorAll(".chip").forEach(chipEl=>{
+    const cat = CATEGORIES.find(c=>c.id===chipEl.dataset.id);
+    chipEl.querySelector(".lbl").textContent = `${cat.icon} ${I18N[currentLang][cat.i18n]}`;
+  });
+}
+
+function selectCategory(cat){
+  activeCategory = cat;
+  document.querySelectorAll(".chip").forEach(el=>{
+    const isActive = el.dataset.id === cat.id;
+    el.classList.toggle("active", isActive);
+    el.style.background = isActive ? cat.color : "";
+  });
+  document.getElementById("sheet").classList.add("expanded");
+  runSearch(cat);
+}
+
+/* =========================================================
+   5. 검색 (카테고리 / 키워드)
+   ========================================================= */
+function runSearch(cat){
+  const opts = { location: centerLatLng, radius: SEARCH_RADIUS_M, sort: kakao.maps.services.SortBy.DISTANCE };
+  const callback = (data, status)=> renderResults(cat, data, status);
+
+  if(cat.type === "category"){
+    places.categorySearch(cat.code, callback, opts);
+  }else{
+    places.keywordSearch(cat.keyword, callback, opts);
+  }
+}
+
+function clearMarkers(){
+  markers.forEach(m=>m.setMap(null));
+  markers = [];
+}
+
+function fmtDistance(meters){
+  const m = Number(meters);
+  if(!m) return "";
+  return m < 1000 ? `${m}m` : `${(m/1000).toFixed(1)}km`;
+}
+
+function renderResults(cat, data, status){
+  clearMarkers();
+  const list = document.getElementById("list");
+  list.innerHTML = "";
+
+  const t = I18N[currentLang];
+  document.getElementById("sheetTitle").innerHTML = `<span class="dot" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${cat.color};margin-right:6px;"></span>${cat.icon} ${t[cat.i18n]}`;
+
+  if(status !== kakao.maps.services.Status.OK || data.length === 0){
+    document.getElementById("sheetCount").textContent = "";
+    list.innerHTML = `<div class="empty">${t.noResults}</div>`;
+    return;
+  }
+
+  document.getElementById("sheetCount").textContent = t.resultsFor(data.length);
+
+  const bounds = new kakao.maps.LatLngBounds();
+
+  data.forEach((place, idx)=>{
+    const pos = new kakao.maps.LatLng(place.y, place.x);
+    bounds.extend(pos);
+
+    // 마커
+    const el = document.createElement("div");
+    el.className = "pin";
+    el.style.background = cat.color;
+    el.innerHTML = `<span>${cat.icon}</span>`;
+    const overlay = new kakao.maps.CustomOverlay({ position: pos, content: el, yAnchor: 1, zIndex: 3 });
+    overlay.setMap(map);
+    markers.push(overlay);
+
+    el.addEventListener("click", ()=>{
+      map.setCenter(pos);
+      const row = document.getElementById(`place-${idx}`);
+      if(row){
+        row.scrollIntoView({ behavior:"smooth", block:"center" });
+        row.classList.add("flash");
+        setTimeout(()=>row.classList.remove("flash"), 1200);
+      }
+      document.getElementById("sheet").classList.add("expanded");
+    });
+
+    // 리스트 행
+    const addr = place.road_address_name || place.address_name || "";
+    const row = document.createElement("div");
+    row.className = "place";
+    row.id = `place-${idx}`;
+    row.innerHTML = `
+      <div class="badge" style="background:${cat.color}">${cat.icon}</div>
+      <div class="info">
+        <p class="pname">${escapeHtml(place.place_name)}</p>
+        <p class="paddr">${escapeHtml(addr)}</p>
+        <div class="actions">
+          ${place.phone ? `<a href="tel:${place.phone}">📞 ${t.call}</a>` : ""}
+          <a href="https://map.kakao.com/link/to/${encodeURIComponent(place.place_name)},${place.y},${place.x}" target="_blank" rel="noopener">🧭 ${t.directions}</a>
+        </div>
+      </div>
+      <div class="dist">${fmtDistance(place.distance)}</div>
+    `;
+    row.addEventListener("click", ()=>{ map.setCenter(pos); map.setLevel(4); });
+    list.appendChild(row);
+  });
+
+  map.setBounds(bounds);
+}
+
+function escapeHtml(str){
+  return String(str || "").replace(/[&<>"']/g, (c)=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[c]));
+}
+
+function toggleSheet(){
+  document.getElementById("sheet").classList.toggle("expanded");
+}
+
+/* =========================================================
+   6. 다국어 적용
+   ========================================================= */
+function applyI18n(){
+  document.documentElement.lang = currentLang;
+  document.querySelectorAll("[data-i18n]").forEach(el=>{
+    const key = el.dataset.i18n;
+    if(I18N[currentLang][key]) el.textContent = I18N[currentLang][key];
+  });
+  refreshChipLabels();
+  if(activeCategory) runSearch(activeCategory); // 결과 리스트 라벨도 새로고침
+}
+
+document.querySelectorAll(".langs button").forEach(btn=>{
+  btn.addEventListener("click", ()=>{
+    currentLang = btn.dataset.lang;
+    document.querySelectorAll(".langs button").forEach(b=>b.classList.toggle("active", b===btn));
+    applyI18n();
+  });
+});
+
+checkKeyAndStart();
+</script>
+</body>
+</html>
