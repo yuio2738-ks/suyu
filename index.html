@@ -67,6 +67,12 @@
   }
   .langs button.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
 
+  .subwaymap-btn{
+    display:inline-block; margin-top:8px; font-size:11.5px; font-weight:700;
+    color:var(--c-subway); text-decoration:none; border:1.5px solid var(--c-subway);
+    border-radius:999px; padding:5px 10px;
+  }
+
   /* ---- Category chips ---- */
   .chipzone{ flex:0 0 auto; background:var(--card); padding:8px 0 10px; border-bottom:1px solid var(--line); }
   .chipgroup{ padding: 0 14px; }
@@ -170,6 +176,7 @@
         <button data-lang="ja">日本語</button>
       </div>
     </div>
+    <a id="subwayMapLink" href="https://www.seoulmetro.co.kr/kr/cyberStation.do" target="_blank" rel="noopener" class="subwaymap-btn" data-i18n="subwayMapBtn">🚇 지하철 노선도</a>
   </header>
 
   <div class="chipzone">
@@ -230,7 +237,10 @@ const I18N = {
     call: "전화", directions: "길찾기",
     cat_hospital: "병원", cat_pharmacy: "약국", cat_police: "경찰서",
     cat_fire: "소방서", cat_convenience: "편의점", cat_subway: "지하철역", cat_bus: "버스정류장",
+    cat_cathedral: "성당",
     resultsFor: (n)=>`${n} · 가까운 순`,
+    subwayMapBtn: "🚇 지하철 노선도",
+    busFallback: "카카오맵 앱에서 버스정류장 더 보기 →",
   },
   en: {
     appTitle: "Gangbuk-gu Visitor Map",
@@ -242,7 +252,10 @@ const I18N = {
     call: "Call", directions: "Directions",
     cat_hospital: "Hospital", cat_pharmacy: "Pharmacy", cat_police: "Police",
     cat_fire: "Fire Station", cat_convenience: "Convenience Store", cat_subway: "Subway Station", cat_bus: "Bus Stop",
+    cat_cathedral: "Catholic Church",
     resultsFor: (n)=>`${n} · nearest first`,
+    subwayMapBtn: "🚇 Subway Map",
+    busFallback: "See more bus stops in Kakao Map app →",
   },
   zh: {
     appTitle: "江北区访客地图",
@@ -254,7 +267,10 @@ const I18N = {
     call: "电话", directions: "路线",
     cat_hospital: "医院", cat_pharmacy: "药店", cat_police: "警察局",
     cat_fire: "消防局", cat_convenience: "便利店", cat_subway: "地铁站", cat_bus: "公交站",
+    cat_cathedral: "天主教堂",
     resultsFor: (n)=>`${n} · 由近到远`,
+    subwayMapBtn: "🚇 地铁线路图",
+    busFallback: "在Kakao地图App查看更多公交站 →",
   },
   ja: {
     appTitle: "江北区(カンブクグ)訪問者マップ",
@@ -266,7 +282,10 @@ const I18N = {
     call: "電話", directions: "道順",
     cat_hospital: "病院", cat_pharmacy: "薬局", cat_police: "警察署",
     cat_fire: "消防署", cat_convenience: "コンビニ", cat_subway: "地下鉄駅", cat_bus: "バス停",
+    cat_cathedral: "カトリック教会",
     resultsFor: (n)=>`${n} · 近い順`,
+    subwayMapBtn: "🚇 地下鉄路線図",
+    busFallback: "Kakaoマップアプリでバス停をもっと見る →",
   },
 };
 let currentLang = "ko";
@@ -283,7 +302,8 @@ const CATEGORIES = [
   { id:"fire",        group:"safety", type:"keyword",  keyword:"소방서", color:"var(--c-fire)",    icon:"🚒", i18n:"cat_fire" },
   { id:"convenience", group:"conv",   type:"category", code:"CS2", color:"var(--c-convenience)", icon:"🏪", i18n:"cat_convenience" },
   { id:"subway",      group:"conv",   type:"category", code:"SW8", color:"var(--c-subway)",      icon:"🚇", i18n:"cat_subway" },
-  { id:"bus",         group:"conv",   type:"keyword",  keyword:"버스정류장", color:"var(--c-bus)", icon:"🚌", i18n:"cat_bus" },
+  { id:"bus",         group:"conv",   type:"keyword",  keyword:"버스정류장", color:"var(--c-bus)", icon:"🚌", i18n:"cat_bus", radius:3000 },
+  { id:"cathedral",   group:"conv",   type:"keyword",  keyword:"성당", color:"#9B5DE5", icon:"⛪", i18n:"cat_cathedral" },
 ];
 
 const SEARCH_RADIUS_M = 1500;
@@ -399,7 +419,11 @@ function selectCategory(cat){
    5. 검색 (카테고리 / 키워드)
    ========================================================= */
 function runSearch(cat){
-  const opts = { location: centerLatLng, radius: SEARCH_RADIUS_M, sort: kakao.maps.services.SortBy.DISTANCE };
+  // 카테고리를 누른 시점의 "현재 지도 중심"을 기준으로 검색한다.
+  // (지도를 드래그해서 다른 동네로 옮긴 뒤에도 그 위치 기준으로 검색되도록)
+  centerLatLng = map.getCenter();
+  const radius = cat.radius || SEARCH_RADIUS_M;
+  const opts = { location: centerLatLng, radius: radius, sort: kakao.maps.services.SortBy.DISTANCE };
   const callback = (data, status)=> renderResults(cat, data, status);
 
   if(cat.type === "category"){
@@ -420,6 +444,24 @@ function fmtDistance(meters){
   return m < 1000 ? `${m}m` : `${(m/1000).toFixed(1)}km`;
 }
 
+function appendBusFallback(list, cat, t){
+  const c = centerLatLng;
+  const fallback = document.createElement("div");
+  fallback.className = "place";
+  fallback.style.background = "#F4F0FF";
+  fallback.style.cursor = "pointer";
+  fallback.innerHTML = `
+    <div class="badge" style="background:${cat.color}">${cat.icon}</div>
+    <div class="info">
+      <p class="pname">${t.busFallback}</p>
+    </div>
+  `;
+  fallback.addEventListener("click", ()=>{
+    window.open(`https://map.kakao.com/?map_type=TYPE_MAP&q=${encodeURIComponent(t.cat_bus)}&panelType=USERLOC&lat=${c.getLat()}&lng=${c.getLng()}`, "_blank", "noopener");
+  });
+  list.appendChild(fallback);
+}
+
 function renderResults(cat, data, status){
   clearMarkers();
   const list = document.getElementById("list");
@@ -431,10 +473,14 @@ function renderResults(cat, data, status){
   if(status !== kakao.maps.services.Status.OK || data.length === 0){
     document.getElementById("sheetCount").textContent = "";
     list.innerHTML = `<div class="empty">${t.noResults}</div>`;
+    if(cat.id === "bus") appendBusFallback(list, cat, t);
     return;
   }
 
   document.getElementById("sheetCount").textContent = t.resultsFor(data.length);
+
+  // 버스정류장은 카카오 검색 데이터가 부실해서, 카카오맵 앱으로 바로 연결되는 보완 링크를 항상 보여준다.
+  if(cat.id === "bus") appendBusFallback(list, cat, t);
 
   const bounds = new kakao.maps.LatLngBounds();
 
