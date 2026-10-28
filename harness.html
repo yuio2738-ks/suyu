@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>테스트 하네스</title>
+<style>
+  body{ font-family:-apple-system,"Segoe UI","Noto Sans KR",sans-serif; margin:0; display:flex; height:100vh; }
+  #frame{ flex:1 1 auto; border:none; border-right:1px solid #ddd; }
+  #panel{ flex:0 0 340px; overflow:auto; padding:14px; font-size:13px; }
+  body.design #panel{ display:none; }
+  body.design #frame{ border-right:none; }
+  h1{ font-size:15px; margin:0 0 4px; }
+  h2{ font-size:12px; margin:14px 0 6px; color:#555; text-transform:uppercase; letter-spacing:.05em; }
+  .note{ color:#666; font-size:11.5px; margin:0 0 12px; line-height:1.5; }
+  .case{ padding:7px 9px; border-radius:7px; margin-bottom:5px; line-height:1.4; }
+  .pass{ background:#E8F6EC; } .fail{ background:#FDECEC; }
+  .case .got{ display:block; color:#555; font-size:11px; margin-top:2px; }
+  #summary{ font-weight:700; margin:10px 0; }
+</style>
+</head>
+<body>
+<iframe id="frame" title="app"></iframe>
+<div id="panel">
+  <h1>테스트 하네스</h1>
+  <p class="note">
+    카카오 SDK·GPS·길찾기 API를 가짜로 바꿔치기해 <code>index.html</code>을 그대로 띄운다.
+    소스를 복사하지 않고 원본을 iframe으로 읽으므로, 앱이 바뀌면 이 페이지도 따라간다.<br />
+    <b>검증 못 하는 것:</b> 실제 지도 타일, 진짜 GPS, 카카오 검색 품질, ORS 경로의 정확성.
+    그건 키를 넣고 실기기로 확인할 것.
+  </p>
+  <div id="summary">실행 중…</div>
+  <div id="cases"></div>
+</div>
+
+<script>
+/* ---------- iframe 안에 주입할 스텁 ---------- */
+function stubScript(opts){
+  const cfg = JSON.stringify(opts);
+  return `<scr`+`ipt>
+const OPTS = ${cfg};
+window.__reqs = [];
+window.__polylines = [];
+
+const FAKE_PLACES = [
+  {place_name:"수유역 1번출구", address_name:"서울 강북구 도봉로", road_address_name:"서울 강북구 도봉로 310", x:"127.0255", y:"37.6380", phone:"02-111-2222", distance:"120"},
+  {place_name:"강북삼성병원", address_name:"서울 강북구", road_address_name:"", x:"127.0300", y:"37.6400", phone:"", distance:"1400"}
+];
+
+function LatLng(lat,lng){ this._lat=+lat; this._lng=+lng; }
+LatLng.prototype.getLat=function(){return this._lat;};
+LatLng.prototype.getLng=function(){return this._lng;};
+
+window.kakao = { maps: {
+  load:(cb)=>cb(),
+  LatLng,
+  Map:function(c,o){
+    this._c=o.center;
+    this.setCenter=(ll)=>{ this._c=ll; };
+    this.getCenter=()=>this._c;
+    this.setLevel=()=>{};
+    this.setBounds=()=>{};
+  },
+  CustomOverlay:function(o){ this._o=o; this.setMap=function(m){ this._map=m; }; },
+  LatLngBounds:function(){ this.extend=()=>{}; },
+  Polyline:function(o){
+    this._o=o;
+    window.__polylines.push(this);
+    this.setMap=function(m){ this._map=m; };
+  },
+  services:{
+    Places:function(){
+      this.categorySearch=(code,cb)=>cb(FAKE_PLACES,"OK");
+      this.keywordSearch=(kw,cb)=>cb(FAKE_PLACES,"OK");
+    },
+    Status:{ OK:"OK" },
+    SortBy:{ DISTANCE:"distance" }
+  }
+}};
+
+// GPS: OPTS.gps 가 false 면 콜백을 아예 호출하지 않는다 (권한 거부와 같은 상태)
+Object.defineProperty(navigator, "geolocation", {
+  configurable: true,
+  value: {
+    getCurrentPosition: (ok, fail)=>{
+      if(OPTS.gps) ok({ coords:{ latitude: OPTS.gps[0], longitude: OPTS.gps[1] } });
+      else if(fail) fail({ code:1 });
+    }
+  }
+});
+
+// 길찾기 API: 네트워크로 나가지 않고 저장된 응답을 돌려준다
+const TMAP_FIXTURE = {
+  metaData: { plan: { itineraries: [{
+    totalTime: 1500, totalDistance: 4200,
+    fare: { regular: { totalFare: 1500 } },
+    legs: [
+      { mode:"WALK", sectionTime:300,
+        start:{ name:"출발" }, end:{ name:"수유역" },
+        steps:[{ linestring:"127.0255,37.6380 127.0260,37.6385" }] },
+      { mode:"SUBWAY", sectionTime:900, route:"수도권4호선", routeColor:"00A5DE",
+        start:{ name:"수유" }, end:{ name:"혜화" },
+        passShape:{ linestring:"127.0260,37.6385 127.0180,37.6200 127.0020,37.5820" } },
+      { mode:"WALK", sectionTime:300,
+        start:{ name:"혜화역" }, end:{ name:"도착" },
+        steps:[{ linestring:"127.0020,37.5820 127.0030,37.5825" }] }
+    ]
+  }] } }
+};
+
+const ORS_FIXTURE = {
+  features: [{
+    properties: { summary: { distance: 1234.5, duration: 912.3 } },
+    geometry: { coordinates: [[127.0255,37.6380],[127.0270,37.6390],[127.0300,37.6400]] }
+  }]
+};
+const origFetch = window.fetch.bind(window);
+window.fetch = async (url, init)=>{
+  const u = String(url);
+  if(u.includes("apis.openapi.sk.com")){
+    window.__reqs.push(u + " :: " + (init && init.body ? init.body : ""));
+    if(OPTS.tmap === "quota") return new Response("", { status:429 });
+    if(OPTS.tmap === "noroute") return new Response(JSON.stringify({ result:{ status:11 } }), { status:200, headers:{ "Content-Type":"application/json" } });
+    return new Response(JSON.stringify(TMAP_FIXTURE), { status:200, headers:{ "Content-Type":"application/json" } });
+  }
+  if(u.includes("openrouteservice.org")){
+    window.__reqs.push(u);
+    if(OPTS.ors === "quota") return new Response("", { status:429 });
+    if(OPTS.ors === "noroute") return new Response("", { status:404 });
+    return new Response(JSON.stringify(ORS_FIXTURE), { status:200, headers:{ "Content-Type":"application/json" } });
+  }
+  return origFetch(url, init);
+};
+
+// 앱이 주입하는 카카오 SDK 스크립트는 네트워크로 보내지 않고 즉시 성공 처리한다
+const origAppend = document.head.appendChild.bind(document.head);
+document.head.appendChild = (node)=>{
+  if(node.tagName === "SCRIPT" && String(node.src).includes("dapi.kakao.com")){
+    setTimeout(()=>node.onload(), 0);
+    return node;
+  }
+  return origAppend(node);
+};
+</scr`+`ipt>`;
+}
+
+/* ---------- 검사 유틸 ---------- */
+const cases = [];
+let section = "";
+function group(name){ section = name; }
+function check(name, expected, actual){
+  cases.push({ section, name, ok: JSON.stringify(expected) === JSON.stringify(actual), expected, actual });
+}
+function checkThat(name, cond, got){
+  cases.push({ section, name, ok: !!cond, expected: true, actual: got === undefined ? cond : got });
+}
+const wait = (ms)=>new Promise(r=>setTimeout(r, ms));
+
+// 요소가 없을 때 하네스가 멈추지 않고 실패로 기록되게 한다
+// hidden 속성만 보면 CSS 가 덮어쓴 경우를 놓친다. 실제로 그려지는지 확인한다.
+function shown(d, id){
+  const el = d.getElementById(id);
+  if(!el) return "<요소 없음: " + id + ">";
+  return d.defaultView.getComputedStyle(el).display !== "none";
+}
+
+function txt(d, sel){
+  const el = d.querySelector(sel);
+  return el ? el.textContent.trim().replace(/\s+/g, " ") : "<요소 없음: " + sel + ">";
+}
+
+const DESIGN_ONLY = new URLSearchParams(location.search).has("design");
+if(DESIGN_ONLY) document.body.classList.add("design");
+
+// config.js 는 건드리지 않는다. 길찾기 키만 테스트 값으로 바꾼 사본을 만들고,
+// import map 으로 앱의 config.js 요청을 그 사본으로 돌린다.
+// opts.keys === false 면 키를 비워서 "키 없음" 상태를 만든다.
+const configBlobs = {};
+async function configUrl(withKeys){
+  if(configBlobs[withKeys]) return configBlobs[withKeys];
+  const src = await fetch("config.js").then(r=>r.text());
+  const value = withKeys ? "TEST-ONLY-harness" : "";
+  let replaced = 0;
+  const patched = src.replace(/export const (ORS_API_KEY|TMAP_APP_KEY) = ".*?";/g, (_, name)=>{
+    replaced++;
+    return `export const ${name} = "${value}";`;
+  });
+  if(replaced !== 2) throw new Error("config.js 에서 길찾기 키 선언 2개를 찾지 못함 (" + replaced + "개)");
+  configBlobs[withKeys] = URL.createObjectURL(new Blob([patched], { type:"text/javascript" }));
+  return configBlobs[withKeys];
+}
+
+let appHtml = null;
+async function loadApp(opts){
+  if(appHtml === null) appHtml = await fetch("index.html").then(r=>r.text());
+  const importMap = JSON.stringify({ imports: {
+    [new URL("config.js", location.href).href]: await configUrl(opts.keys !== false)
+  }});
+  const patched = appHtml.replace(
+    '<script type="module" src="map.js">',
+    `<script type="importmap">${importMap}</scr` + `ipt>` + stubScript(opts) + '<script type="module" src="map.js">'
+  );
+  const frame = document.getElementById("frame");
+  await new Promise(res=>{ frame.addEventListener("load", res, { once:true }); frame.srcdoc = patched; });
+  await wait(300);
+  return frame.contentDocument;
+}
+
+const SUYU = [37.6380, 127.0255];       // 수유역 부근
+const FAR  = [37.5000, 127.0255];       // 약 15km 남쪽 (도보 제한 확인용)
+
+async function run(){
+  // 기본 상태: GPS 있음, 길찾기 API 정상
+  let d = await loadApp({ gps: SUYU, ors: "ok" });
+  if(DESIGN_ONLY) return;
+
+  /* ---------- 기존 기능 (0차 분리 회귀 확인) ---------- */
+  group("기본 화면");
+  check("카테고리 칩 8개 생성", 8, d.querySelectorAll(".chip").length);
+  check("키 설정 오버레이 숨김", "none", d.getElementById("setup").style.display);
+  check("칩 라벨 한국어", "🏥 병원", d.querySelector(".chip .lbl").textContent);
+
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  check("카테고리 선택 시 시트 펼침", true, d.getElementById("sheet").classList.contains("expanded"));
+  check("결과 행 수", 2, d.querySelectorAll(".place").length);
+  check("결과 개수 라벨", "2 · 가까운 순", d.getElementById("sheetCount").textContent);
+  check("거리 표기(m/km 변환)", ["120m","1.4km"], [...d.querySelectorAll(".place .dist")].map(e=>e.textContent));
+  check("전화번호 있는 행에만 전화 버튼", 1, d.querySelectorAll('.place .actions a[href^="tel:"]').length);
+  check("길찾기는 외부 링크가 아니라 버튼", 2, d.querySelectorAll(".place .route-btn").length);
+  check("길찾기 화면은 처음에 숨김", false, shown(d, "routeView"));
+  check("출발지 확정 바는 처음에 숨김", false, shown(d, "pickBar"));
+  check("가운데 핀은 처음에 숨김", false, shown(d, "centerPin"));
+  check("카카오맵 링크는 평소에 노출되지 않음", 0,
+    d.querySelectorAll('#list a[href*="map.kakao.com/link/to"]').length);
+
+  /* ---------- 길찾기: 도보 ---------- */
+  group("길찾기 · 도보");
+  d.querySelector(".place .route-btn").click();
+  await wait(250);
+  check("길찾기 화면 열림", true, shown(d, "routeView"));
+  check("목록 숨김", false, shown(d, "list"));
+  check("도착지 이름", "수유역 1번출구", d.getElementById("routeDestName").textContent);
+  check("출발지 기본값 = 현재 위치", "현재 위치", d.getElementById("originName").textContent);
+  check("기본 수단 = 도보", "walk", d.querySelector(".route-modes .mode.active").dataset.mode);
+  check("시트 머리말이 길찾기로 바뀜", "🧭 길찾기", txt(d, "#sheetTitle"));
+  checkThat("도보 프로필로 요청", d.defaultView.__reqs.some(u=>u.includes("foot-walking")),
+    d.defaultView.__reqs[0]);
+  check("소요시간 표기(912초 → 15분)", "15분", txt(d, ".route-summary .dur"));
+  check("거리 표기(1234m → 1.2km)", "1.2km", txt(d, ".route-summary .dist"));
+  check("지도에 경로선 1개", 1, d.defaultView.__polylines.length);
+  check("경로선 좌표 수", 3, (d.defaultView.__polylines[0] || { _o:{ path:[] } })._o.path.length);
+  const firstPt = (d.defaultView.__polylines[0] || { _o:{ path:[] } })._o.path[0];
+  check("경로선 좌표 순서(위도,경도 뒤집힘 확인)", [37.638, 127.0255],
+    firstPt ? [firstPt.getLat(), firstPt.getLng()] : "<경로선 없음>");
+
+  /* ---------- 길찾기: 자동차 ---------- */
+  group("길찾기 · 자동차");
+  const before = d.defaultView.__reqs.length;
+  d.querySelector('.route-modes .mode[data-mode="car"]').click();
+  await wait(250);
+  checkThat("자동차 프로필로 요청", d.defaultView.__reqs.slice(before).some(u=>u.includes("driving-car")),
+    d.defaultView.__reqs.slice(before)[0]);
+  check("누른 수단만 호출(요청 1건 추가)", before + 1, d.defaultView.__reqs.length);
+
+  /* ---------- 길찾기: 대중교통 ---------- */
+  group("길찾기 · 대중교통");
+  const beforeTransit = d.defaultView.__reqs.length;
+  d.querySelector('.route-modes .mode[data-mode="transit"]').click();
+  await wait(300);
+  checkThat("TMAP 으로 요청", d.defaultView.__reqs.slice(beforeTransit).some(u=>u.includes("apis.openapi.sk.com")),
+    d.defaultView.__reqs.slice(beforeTransit)[0]);
+  checkThat("한국어 UI 면 lang 0", (d.defaultView.__reqs.slice(beforeTransit)[0] || "").includes('"lang":0'));
+  check("소요시간(1500초 → 25분)", "25분", txt(d, ".route-summary .dur"));
+  check("거리(4200m → 4.2km)", "4.2km", txt(d, ".route-summary .dist"));
+  check("노선 요약 구간 수", 3, d.querySelectorAll(".route-legs .leg").length);
+  checkThat("노선명 표시", txt(d, ".route-legs").includes("수도권4호선"), txt(d, ".route-legs"));
+  checkThat("환승 역 이름 표시", txt(d, ".route-legs").includes("수유 → 혜화"), txt(d, ".route-legs"));
+  checkThat("요금 표시", txt(d, ".route-fare").includes("1,500"), txt(d, ".route-fare"));
+  check("구간마다 경로선", 3, d.defaultView.__polylines.filter(l=>l._map).length);
+  checkThat("도보 구간은 점선",
+    d.defaultView.__polylines.filter(l=>l._map)[0]._o.strokeStyle === "shortdash",
+    d.defaultView.__polylines.filter(l=>l._map)[0]._o.strokeStyle);
+  checkThat("지하철 구간은 노선 색",
+    d.defaultView.__polylines.filter(l=>l._map)[1]._o.strokeColor === "#00A5DE",
+    d.defaultView.__polylines.filter(l=>l._map)[1]._o.strokeColor);
+  check("대중교통은 5km 넘어도 막지 않음", false, txt(d, "#routeResult").includes("대중교통을 이용"));
+
+  /* ---------- 언어 전환 ---------- */
+  group("언어 전환");
+  const beforeLang = d.defaultView.__reqs.length;
+  d.querySelector('.langs button[data-lang="it"]').click();
+  await wait(250);
+  check("길찾기 화면 유지", true, shown(d, "routeView"));
+  check("출발지 라벨 번역", "Posizione attuale", d.getElementById("originName").textContent);
+  check("수단 탭 번역", "Auto", txt(d, '.route-modes .mode[data-mode="car"] span:last-child'));
+  check("대중교통 탭 번역", "Mezzi pubblici", txt(d, '.route-modes .mode[data-mode="transit"] span:last-child'));
+  check("언어를 바꿔도 시트 머리말은 길찾기", "🧭 Indicazioni", txt(d, "#sheetTitle"));
+  check("언어만 바꿀 때는 재요청 없음", beforeLang, d.defaultView.__reqs.length);
+  const beforeEn = d.defaultView.__reqs.length;
+  d.querySelector('.route-modes .mode[data-mode="transit"]').click();
+  await wait(300);
+  checkThat("한국어가 아니면 lang 1 로 요청",
+    (d.defaultView.__reqs.slice(beforeEn)[0] || "").includes('"lang":1'),
+    d.defaultView.__reqs.slice(beforeEn)[0]);
+  d.querySelector('.langs button[data-lang="ko"]').click();
+  await wait(150);
+
+  /* ---------- 뒤로 ---------- */
+  group("뒤로가기");
+  d.getElementById("routeBack").click();
+  await wait(150);
+  check("목록으로 복귀", false, shown(d, "routeView"));
+  check("목록 다시 표시", true, shown(d, "list"));
+  check("시트 머리말이 카테고리로 복귀", true, txt(d, "#sheetTitle").includes("병원"));
+  check("경로선 제거됨", null, (d.defaultView.__polylines[0] || {})._map ?? null);
+
+  /* ---------- 출발지: 지도에서 선택 ---------- */
+  group("출발지 · 지도에서 선택");
+  d.querySelector(".place .route-btn").click();
+  await wait(200);
+  d.getElementById("originPickBtn").click();
+  await wait(100);
+  check("가운데 핀 표시", true, shown(d, "centerPin"));
+  check("확정 바 표시", true, shown(d, "pickBar"));
+  check("핀 찍는 동안 시트 접힘", false, d.getElementById("sheet").classList.contains("expanded"));
+  d.getElementById("pickConfirm").click();
+  await wait(250);
+  check("출발지가 지도에서 선택한 지점으로 바뀜", "지도에서 선택", d.getElementById("originName").textContent);
+  check("핀 숨김", false, shown(d, "centerPin"));
+  check("확정 바 숨김", false, shown(d, "pickBar"));
+
+  /* ---------- 출발지: 장소 검색 ---------- */
+  group("출발지 · 장소 검색");
+  d.getElementById("originSearchBtn").click();
+  await wait(100);
+  check("검색창 열림", true, shown(d, "originSearchBox"));
+  const input = d.getElementById("originQuery");
+  input.value = "수유역";
+  input.dispatchEvent(new d.defaultView.KeyboardEvent("keydown", { key:"Enter", bubbles:true }));
+  await wait(200);
+  checkThat("검색 결과 표시", d.querySelectorAll("#originResults .hit").length > 0,
+    d.querySelectorAll("#originResults .hit").length);
+  d.querySelector("#originResults .hit").click();
+  await wait(250);
+  check("선택한 장소가 출발지가 됨", "수유역 1번출구", d.getElementById("originName").textContent);
+  check("검색창 닫힘", false, shown(d, "originSearchBox"));
+
+  /* ---------- GPS 없음 ---------- */
+  group("GPS 없음");
+  d = await loadApp({ gps: null, ors: "ok" });
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  d.querySelector(".place .route-btn").click();
+  await wait(250);
+  check("출발지 미정 표시", "—", d.getElementById("originName").textContent);
+  check("출발지를 먼저 정하라고 안내", "출발지를 먼저 정해주세요",
+    txt(d, ".route-msg").replace(/🗺️.*/, "").trim());
+  check("출발지 없으면 요청하지 않음", 0, d.defaultView.__reqs.length);
+
+  /* ---------- 먼 거리 도보 ---------- */
+  group("먼 거리 도보");
+  d = await loadApp({ gps: FAR, ors: "ok" });
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  d.querySelector(".place .route-btn").click();
+  await wait(250);
+  checkThat("대중교통 권유 문구", txt(d, ".route-msg").includes("대중교통"), txt(d, ".route-msg"));
+  check("5km 초과 도보는 요청하지 않음", 0, d.defaultView.__reqs.length);
+  checkThat("이때는 카카오맵 링크 노출",
+    !!d.querySelector('.route-msg a[href*="map.kakao.com/link/to"]'));
+
+  /* ---------- 한도 초과 ---------- */
+  group("한도 초과(429)");
+  d = await loadApp({ gps: SUYU, ors: "quota" });
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  d.querySelector(".place .route-btn").click();
+  await wait(300);
+  checkThat("한도 초과 안내", txt(d, ".route-msg").includes("사용량"), txt(d, ".route-msg"));
+  checkThat("실패 시 카카오맵 링크 노출",
+    !!d.querySelector('.route-msg a[href*="map.kakao.com/link/to"]'));
+
+  /* ---------- 경로 없음 ---------- */
+  group("경로 없음(404)");
+  d = await loadApp({ gps: SUYU, ors: "noroute" });
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  d.querySelector(".place .route-btn").click();
+  await wait(300);
+  checkThat("경로 없음 안내", txt(d, ".route-msg").includes("경로를 찾지 못"), txt(d, ".route-msg"));
+
+  /* ---------- 키 없음 (운영 config.js 기본 상태) ---------- */
+  group("길찾기 키 없음");
+  d = await loadApp({ gps: SUYU, ors: "ok", keys: false });
+  d.querySelector('.chip[data-id="hospital"]').click();
+  await wait(150);
+  d.querySelector(".place .route-btn").click();
+  await wait(300);
+  checkThat("키 없음 안내", txt(d, ".route-msg").includes("키가 설정되지 않았"), txt(d, ".route-msg"));
+  check("키 없으면 요청하지 않음", 0, d.defaultView.__reqs.length);
+  checkThat("이때도 카카오맵 링크 노출",
+    !!d.querySelector('.route-msg a[href*="map.kakao.com/link/to"]'));
+
+  /* ---------- 순수 함수 ---------- */
+  group("routing.js 단위 검사");
+  const R = await import("./routing.js");
+  const ko = (await import("./i18n.js")).I18N.ko;
+  check("1시간 5분", "1시간 5분", R.formatDuration(3900, ko));
+  check("1분 미만도 1분으로", "1분", R.formatDuration(20, ko));
+  check("정각은 시간만", "2시간", R.formatDuration(7200, ko));
+  check("미터 표기", "900m", R.formatDistance(900));
+  check("킬로미터 표기", "2.3km", R.formatDistance(2345));
+  check("응답 없으면 no-route", { ok:false, reason:"no-route" }, R.parseRoute({}));
+  check("좌표를 위도·경도로 뒤집음",
+    { lat:37.638, lng:127.0255 },
+    R.parseRoute({ features:[{ properties:{ summary:{distance:10,duration:10} },
+      geometry:{ coordinates:[[127.0255,37.638]] } }] }).path[0]);
+  check("linestring 파싱(경도,위도 → 위도,경도)",
+    [{lat:37.638,lng:127.0255},{lat:37.6385,lng:127.026}],
+    R.parseLinestring("127.0255,37.6380 127.0260,37.6385"));
+  check("대중교통 응답 없으면 no-route", { ok:false, reason:"no-route" }, R.parseTransit({ result:{ status:11 } }));
+  check("수단 아이콘", ["🚶","🚇","🚌"], [R.modeIcon("WALK"), R.modeIcon("SUBWAY"), R.modeIcon("BUS")]);
+
+  const straight = R.straightDistanceM({lat:37.6380,lng:127.0255},{lat:37.6400,lng:127.0300});
+  checkThat("직선거리 근사(약 450m)", straight > 380 && straight < 520, straight + "m");
+
+  render();
+}
+
+function render(){
+  const box = document.getElementById("cases");
+  let html = "", last = "";
+  for(const c of cases){
+    if(c.section !== last){ html += `<h2>${c.section}</h2>`; last = c.section; }
+    html += `<div class="case ${c.ok ? "pass" : "fail"}">
+      ${c.ok ? "✅" : "❌"} ${c.name}
+      ${c.ok ? "" : `<span class="got">기대: ${JSON.stringify(c.expected)} / 실제: ${JSON.stringify(c.actual)}</span>`}
+    </div>`;
+  }
+  box.innerHTML = html;
+  const failed = cases.filter(c=>!c.ok).length;
+  document.getElementById("summary").textContent =
+    failed === 0 ? `전체 통과 (${cases.length}건)` : `실패 ${failed}건 / 전체 ${cases.length}건`;
+}
+
+run().catch(e=>{
+  render();
+  document.getElementById("summary").textContent = "하네스 실행 중단: " + e.message;
+});
+</script>
+</body>
+</html>
